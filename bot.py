@@ -6,10 +6,16 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎭 به ربات Clever Minds خوش آمدید!\n\nربات با موفقیت فعال شد."
+        "🎭 خوش آمدید!\nربات Clever Minds با موفقیت فعال شد."
     )
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
+def main():
+    if not TOKEN:
+        raise RuntimeError("BOT_TOKEN تنظیم نشده است")
 
-app.run_polling()
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.run_polling()
+
+if _name_ == "_main_":
+    main()

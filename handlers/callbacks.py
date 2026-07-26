@@ -4,6 +4,7 @@ from telegram import Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
+from engine.role_service import assign_roles, narrator_roles_message, private_role_message
 from engine.game_service import (
     add_pending_player,
     approve_player,
@@ -11,8 +12,11 @@ from engine.game_service import (
     create_game,
     generate_game_code,
     get_player,
+    kick_player,
     reject_player,
     randomize_seats,
+    start_day,
+    start_night,
     transfer_narrator,
 )
 from keyboards.menus import (
@@ -22,11 +26,14 @@ from keyboards.menus import (
     scenarios_menu,
 )
 from keyboards.narrator import (
+    event_log_menu,
+    kick_reason_menu,
     narrator_lobby_menu,
     player_actions_menu,
     players_management_menu,
     transfer_menu,
 )
+from engine.event_service import event_log_text, log_event
 from scenarios import SCENARIOS
 from storage import games, user_states
 from views import narrator_lobby_text, player_detail_text
@@ -43,7 +50,7 @@ async def safe_edit_lobby(
             chat_id=game["narrator_chat_id"],
             message_id=game["lobby_message_id"],
             text=narrator_lobby_text(game),
-            reply_markup=narrator_lobby_menu(game["code"]),
+            reply_markup=narrator_lobby_menu(game["code"], game),
             parse_mode="HTML",
         )
     except BadRequest as exc:
@@ -111,7 +118,7 @@ async def button_handler(
             ):
                 await query.edit_message_text(
                     narrator_lobby_text(game),
-                    reply_markup=narrator_lobby_menu(code),
+                    reply_markup=narrator_lobby_menu(code, game),
                     parse_mode="HTML",
                 )
                 game["narrator_chat_id"] = query.message.chat_id
@@ -132,7 +139,7 @@ async def button_handler(
         }
         await query.edit_message_text(
             narrator_lobby_text(placeholder),
-            reply_markup=narrator_lobby_menu(code),
+            reply_markup=narrator_lobby_menu(code, placeholder),
             parse_mode="HTML",
         )
 
@@ -209,6 +216,11 @@ async def button_handler(
             "close_registration:",
             "randomize_seats:",
             "start_game:",
+            "kick_menu:",
+            "kick:",
+            "event_log:",
+            "start_night:",
+            "start_day:",
             "cancel_game:",
         )
     ):
@@ -225,7 +237,7 @@ async def button_handler(
     if action.startswith("refresh_game:"):
         await query.edit_message_text(
             narrator_lobby_text(game),
-            reply_markup=narrator_lobby_menu(game["code"]),
+            reply_markup=narrator_lobby_menu(game["code"], game),
             parse_mode="HTML",
         )
         game["narrator_chat_id"] = query.message.chat_id
@@ -251,7 +263,7 @@ async def button_handler(
             return
         await query.edit_message_text(
             player_detail_text(player),
-            reply_markup=player_actions_menu(code, player["user_id"]),
+            reply_markup=player_actions_menu(code, player["user_id"], game=game, player=player),
             parse_mode="HTML",
         )
         return
@@ -310,6 +322,100 @@ async def button_handler(
         await safe_edit_lobby(context, game)
         return
 
+    if action.startswith("kick_menu:"):
+        _, code, raw_user_id = action.split(":")
+        player = get_player(game, int(raw_user_id))
+        if not player:
+            await query.answer("بازیکن پیدا نشد.", show_alert=True)
+            return
+        if game.get("status") != "running" or game.get("phase") != "day":
+            await query.answer(
+                "اخراج بازیکن فقط در فاز روزِ بازی فعال است.",
+                show_alert=True,
+            )
+            return
+        if player.get("status") != "approved" or not player.get("alive", True):
+            await query.answer("این بازیکن دیگر فعال نیست.", show_alert=True)
+            return
+        await query.edit_message_text(
+            text=(
+                f"🚫 <b>اخراج {player['name']}</b>\n\n"
+                "دلیل اخراج را انتخاب کن. بازیکن همان لحظه از بازی خارج می‌شود "
+                "و برای شب بعد هیچ اکشنی دریافت نخواهد کرد."
+            ),
+            reply_markup=kick_reason_menu(code, player["user_id"]),
+            parse_mode="HTML",
+        )
+        return
+
+    if action.startswith("kick:"):
+        _, code, raw_user_id, reason_code = action.split(":")
+        try:
+            player = kick_player(
+                game,
+                user_id=int(raw_user_id),
+                narrator_id=user.id,
+                reason_code=reason_code,
+            )
+        except ValueError as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+
+        await query.answer(f"{player['name']} از بازی اخراج شد.", show_alert=True)
+        try:
+            await context.bot.send_message(
+                chat_id=player["user_id"],
+                text=(
+                    "🚫 <b>شما توسط گرداننده از بازی اخراج شدید.</b>\n\n"
+                    f"دلیل: <b>{player['removed_reason']}</b>\n"
+                    "از این لحظه هیچ اکشن شبانه‌ای برای شما فعال نخواهد شد."
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.warning("Could not notify kicked player: %s", exc)
+
+        await query.edit_message_text(
+            narrator_lobby_text(game),
+            reply_markup=narrator_lobby_menu(code, game),
+            parse_mode="HTML",
+        )
+        return
+
+    if action.startswith("event_log:"):
+        await query.edit_message_text(
+            event_log_text(game),
+            reply_markup=event_log_menu(game["code"]),
+            parse_mode="HTML",
+        )
+        return
+
+    if action.startswith("start_night:"):
+        try:
+            start_night(game)
+        except ValueError as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+        await query.edit_message_text(
+            narrator_lobby_text(game),
+            reply_markup=narrator_lobby_menu(game["code"], game),
+            parse_mode="HTML",
+        )
+        return
+
+    if action.startswith("start_day:"):
+        try:
+            start_day(game)
+        except ValueError as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+        await query.edit_message_text(
+            narrator_lobby_text(game),
+            reply_markup=narrator_lobby_menu(game["code"], game),
+            parse_mode="HTML",
+        )
+        return
+
     if action.startswith("transfer_menu:"):
         approved = approved_players(game)
         if not approved:
@@ -361,7 +467,7 @@ async def button_handler(
             msg = await context.bot.send_message(
                 chat_id=player["user_id"],
                 text=narrator_lobby_text(game),
-                reply_markup=narrator_lobby_menu(code),
+                reply_markup=narrator_lobby_menu(code, game),
                 parse_mode="HTML",
             )
             game["narrator_chat_id"] = msg.chat_id
@@ -391,7 +497,7 @@ async def button_handler(
                     pass
         await query.edit_message_text(
             narrator_lobby_text(game),
-            reply_markup=narrator_lobby_menu(game["code"]),
+            reply_markup=narrator_lobby_menu(game["code"], game),
             parse_mode="HTML",
         )
         return
@@ -423,7 +529,7 @@ async def button_handler(
                 pass
         await query.edit_message_text(
             narrator_lobby_text(game),
-            reply_markup=narrator_lobby_menu(game["code"]),
+            reply_markup=narrator_lobby_menu(game["code"], game),
             parse_mode="HTML",
         )
         return
@@ -436,14 +542,49 @@ async def button_handler(
                 show_alert=True,
             )
             return
+
         game["registration_open"] = False
         if not game.get("seats_randomized"):
             randomize_seats(game)
+
+        try:
+            assigned_players = assign_roles(game)
+        except ValueError as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+
+        failed_players = []
+        for player in assigned_players:
+            try:
+                await context.bot.send_message(
+                    chat_id=player["user_id"],
+                    text=private_role_message(game, player),
+                )
+            except Exception as exc:
+                logger.warning("Could not send role to %s: %s", player["user_id"], exc)
+                failed_players.append(player["name"])
+
         game["status"] = "running"
+        game["phase"] = "day"
+        game["day_number"] = 1
+        game["night_number"] = 0
+        log_event(
+            game,
+            event_type="game_started",
+            message="▶️ بازی آغاز شد و نقش‌ها تقسیم شدند.",
+            actor_id=user.id,
+        )
+        narrator_text = narrator_roles_message(game)
+        if failed_players:
+            narrator_text += (
+                "\n\n⚠️ ارسال نقش برای این بازیکنان ناموفق بود: "
+                + "، ".join(failed_players)
+                + "\nآن‌ها باید ابتدا بات را Start کرده باشند."
+            )
+
         await query.edit_message_text(
-            "▶️ <b>بازی شروع شد</b>\n\nمرحله بعد: تقسیم نقش‌ها",
-            reply_markup=narrator_lobby_menu(game["code"]),
-            parse_mode="HTML",
+            narrator_text,
+            reply_markup=narrator_lobby_menu(game["code"], game),
         )
         return
 

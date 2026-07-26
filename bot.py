@@ -1,5 +1,6 @@
 import logging
 
+from telegram import BotCommand
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -11,6 +12,13 @@ from telegram.ext import (
 
 from config import PORT, TOKEN, WEBHOOK_URL
 from handlers.callbacks import button_handler
+from handlers.commands import (
+    create_game_command,
+    help_command,
+    join_game_command,
+    menu_command,
+    profile_command,
+)
 from handlers.start import start
 from handlers.text import text_handler
 
@@ -29,6 +37,20 @@ async def error_handler(update: object, context) -> None:
     )
 
 
+async def post_init(application: Application) -> None:
+    """ثبت منوی دستورات تلگرام تا گزینه‌های Menu واقعاً اجرا شوند."""
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "شروع و نمایش صفحه اصلی"),
+            BotCommand("menu", "نمایش منوی اصلی"),
+            BotCommand("create_game", "ایجاد میز بازی"),
+            BotCommand("join_game", "ورود به بازی با کد"),
+            BotCommand("profile", "پروفایل من"),
+            BotCommand("help", "راهنمای استفاده"),
+        ]
+    )
+
+
 def main() -> None:
     if not TOKEN:
         raise RuntimeError("متغیر BOT_TOKEN در Render تنظیم نشده است.")
@@ -36,10 +58,16 @@ def main() -> None:
     application: Application = (
         ApplicationBuilder()
         .token(TOKEN)
+        .post_init(post_init)
         .build()
     )
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("menu", menu_command))
+    application.add_handler(CommandHandler("create_game", create_game_command))
+    application.add_handler(CommandHandler("join_game", join_game_command))
+    application.add_handler(CommandHandler("profile", profile_command))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(
         MessageHandler(

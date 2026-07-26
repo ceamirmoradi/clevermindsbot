@@ -18,13 +18,12 @@ def narrator_lobby_text(game: dict[str, Any]) -> str:
     pending = pending_players(game)
 
     player_lines = []
-    for player in sorted(
-        approved,
-        key=lambda p: p["seat"] if p.get("seat") else 999,
-    ):
-        player_lines.append(
-            f"{player['seat']}. <b>{player['name']}</b> ✅"
-        )
+    if game.get("seats_randomized"):
+        for player in sorted(approved, key=lambda p: p.get("seat") or 999):
+            player_lines.append(f"{player['seat']}. <b>{player['name']}</b> ✅")
+    else:
+        for player in approved:
+            player_lines.append(f"• <b>{player['name']}</b> ✅ — صندلی در انتظار قرعه")
 
     if not player_lines:
         player_lines.append("هنوز بازیکن تأییدشده‌ای وجود ندارد.")
@@ -34,27 +33,29 @@ def narrator_lobby_text(game: dict[str, Any]) -> str:
         if game["registration_open"]
         else "🔴 ثبت‌نام بسته است"
     )
+    seating = (
+        "🎲 صندلی‌ها قرعه‌کشی شده‌اند"
+        if game.get("seats_randomized")
+        else "⏳ صندلی‌ها هنوز قرعه‌کشی نشده‌اند"
+    )
 
     return (
-        f"🎭 <b>پنل زنده بازی {game['code']}</b>\n\n"
+        f"🎭 <b>میز بازی {game['code']}</b>\n\n"
         f"{scenario['emoji']} سناریو: <b>{scenario['name']}</b>\n"
         f"🎙 گرداننده: <b>{game['narrator_name']}</b>\n"
         f"🔑 کد ورود: <code>{game['code']}</code>\n\n"
         f"👥 تأییدشده: <b>{len(approved)} / {game['max_players']}</b>\n"
         f"⏳ در انتظار تأیید: <b>{len(pending)}</b>\n"
-        f"{registration}\n\n"
-        f"<b>صندلی‌ها</b>\n"
+        f"{registration}\n"
+        f"{seating}\n\n"
+        f"<b>چیدمان بازیکنان</b>\n"
         + "\n".join(player_lines)
     )
 
 
 def player_detail_text(player: dict[str, Any]) -> str:
-    username = (
-        f"@{player['username']}"
-        if player.get("username")
-        else "ندارد"
-    )
-    seat = player.get("seat") or "تعیین نشده"
+    username = f"@{player['username']}" if player.get("username") else "ندارد"
+    seat = player.get("seat") or "در انتظار قرعه‌کشی"
     return (
         f"👤 <b>{player['name']}</b>\n\n"
         f"وضعیت: <b>{status_label(player['status'])}</b>\n"

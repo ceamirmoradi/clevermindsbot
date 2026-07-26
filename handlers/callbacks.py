@@ -12,6 +12,7 @@ from engine.game_service import (
     generate_game_code,
     get_player,
     reject_player,
+    randomize_seats,
     transfer_narrator,
 )
 from keyboards.menus import (
@@ -180,7 +181,7 @@ async def button_handler(
         await query.edit_message_text(
             text=(
                 "⏳ <b>درخواست ورود ثبت شد</b>\n\n"
-                "پس از تأیید گرداننده، شماره صندلی برایت ارسال می‌شود."
+                "پس از تأیید گرداننده، شماره صندلی در زمان قرعه‌کشی مشخص می‌شود."
             ),
             reply_markup=back_to_home_menu(),
             parse_mode="HTML",
@@ -206,6 +207,7 @@ async def button_handler(
             "transfer_menu:",
             "transfer_confirm:",
             "close_registration:",
+            "randomize_seats:",
             "start_game:",
             "cancel_game:",
         )
@@ -267,9 +269,9 @@ async def button_handler(
             await context.bot.send_message(
                 chat_id=player["user_id"],
                 text=(
-                    "✅ <b>ورود شما تأیید شد</b>\n\n"
+                    "✅ <b>ورود شما به میز بازی تأیید شد</b>\n\n"
                     f"🔑 کد بازی: <code>{code}</code>\n"
-                    f"🪑 شماره صندلی: <b>{player['seat']}</b>"
+                    "🪑 شماره صندلی پس از بسته‌شدن ثبت‌نام و قرعه‌کشی اعلام می‌شود."
                 ),
                 parse_mode="HTML",
             )
@@ -372,6 +374,53 @@ async def button_handler(
 
     if action.startswith("close_registration:"):
         game["registration_open"] = False
+        if approved_players(game):
+            randomize_seats(game)
+            for player in approved_players(game):
+                try:
+                    await context.bot.send_message(
+                        chat_id=player["user_id"],
+                        text=(
+                            "🎲 <b>قرعه‌کشی صندلی‌ها انجام شد</b>\n\n"
+                            f"🔑 کد بازی: <code>{game['code']}</code>\n"
+                            f"🪑 شماره صندلی شما: <b>{player['seat']}</b>"
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+        await query.edit_message_text(
+            narrator_lobby_text(game),
+            reply_markup=narrator_lobby_menu(game["code"]),
+            parse_mode="HTML",
+        )
+        return
+
+    if action.startswith("randomize_seats:"):
+        if game["registration_open"]:
+            await query.answer(
+                "ابتدا ثبت‌نام را ببند تا فهرست بازیکنان نهایی شود.",
+                show_alert=True,
+            )
+            return
+        try:
+            randomize_seats(game)
+        except ValueError as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+        for player in approved_players(game):
+            try:
+                await context.bot.send_message(
+                    chat_id=player["user_id"],
+                    text=(
+                        "🔄 <b>صندلی‌ها دوباره قرعه‌کشی شدند</b>\n\n"
+                        f"🔑 کد بازی: <code>{game['code']}</code>\n"
+                        f"🪑 شماره صندلی جدید شما: <b>{player['seat']}</b>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
         await query.edit_message_text(
             narrator_lobby_text(game),
             reply_markup=narrator_lobby_menu(game["code"]),
@@ -388,6 +437,8 @@ async def button_handler(
             )
             return
         game["registration_open"] = False
+        if not game.get("seats_randomized"):
+            randomize_seats(game)
         game["status"] = "running"
         await query.edit_message_text(
             "▶️ <b>بازی شروع شد</b>\n\nمرحله بعد: تقسیم نقش‌ها",

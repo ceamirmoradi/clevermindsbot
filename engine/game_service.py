@@ -1,13 +1,15 @@
-import random
+import secrets
 from typing import Any
 
 from scenarios import SCENARIOS
 from storage import games
 
+_rng = secrets.SystemRandom()
+
 
 def generate_game_code() -> str:
     for _ in range(200):
-        code = str(random.randint(1000, 9999))
+        code = str(_rng.randint(1000, 9999))
         if code not in games:
             return code
     raise RuntimeError("امکان تولید کد یکتا وجود ندارد.")
@@ -28,16 +30,22 @@ def pending_players(game: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in game["players"] if p["status"] == "pending"]
 
 
-def next_free_seat(game: dict[str, Any]) -> int | None:
-    used = {
-        p["seat"]
-        for p in game["players"]
-        if p["status"] == "approved" and p.get("seat")
-    }
-    for seat in range(1, game["max_players"] + 1):
-        if seat not in used:
-            return seat
-    return None
+def randomize_seats(game: dict[str, Any]) -> list[dict[str, Any]]:
+    """Assign seats randomly and independently from registration order."""
+    players = approved_players(game)
+    if not players:
+        raise ValueError("هیچ بازیکن تأییدشده‌ای وجود ندارد.")
+    if game.get("status") == "running":
+        raise ValueError("بعد از شروع بازی امکان قرعه‌کشی مجدد صندلی‌ها وجود ندارد.")
+
+    shuffled = players.copy()
+    _rng.shuffle(shuffled)
+    for seat, player in enumerate(shuffled, start=1):
+        player["seat"] = seat
+
+    game["seats_randomized"] = True
+    game["history"].append("چیدمان صندلی‌ها به‌صورت تصادفی قرعه‌کشی شد.")
+    return sorted(shuffled, key=lambda p: p["seat"])
 
 
 def create_game(
@@ -60,6 +68,7 @@ def create_game(
         "max_players": scenario["player_count"],
         "registration_open": True,
         "status": "waiting",
+        "seats_randomized": False,
         "narrator_chat_id": narrator_chat_id,
         "lobby_message_id": lobby_message_id,
         "history": [],
@@ -99,13 +108,13 @@ def approve_player(game: dict[str, Any], user_id: int) -> dict[str, Any]:
         raise ValueError("بازیکن پیدا نشد.")
 
     if player["status"] != "approved":
-        seat = next_free_seat(game)
-        if seat is None:
-            raise ValueError("همه صندلی‌ها پر هستند.")
+        if len(approved_players(game)) >= game["max_players"]:
+            raise ValueError("همه ظرفیت‌های میز بازی پر هستند.")
         player["status"] = "approved"
-        player["seat"] = seat
+        player["seat"] = None
+        game["seats_randomized"] = False
         game["history"].append(
-            f"{player['name']} تأیید شد و روی صندلی {seat} قرار گرفت."
+            f"{player['name']} تأیید شد؛ شماره صندلی هنگام قرعه‌کشی تعیین می‌شود."
         )
     return player
 
@@ -118,6 +127,7 @@ def reject_player(game: dict[str, Any], user_id: int) -> dict[str, Any]:
     old_seat = player.get("seat")
     player["status"] = "rejected"
     player["seat"] = None
+    game["seats_randomized"] = False
     game["history"].append(
         f"{player['name']} رد شد"
         + (f" و صندلی {old_seat} آزاد شد." if old_seat else ".")
@@ -135,6 +145,7 @@ def transfer_narrator(
     game["previous_narrator_id"] = game["narrator_id"]
     game["narrator_id"] = new_narrator_id
     game["narrator_name"] = new_narrator_name
+    game["seats_randomized"] = False
     game["history"].append(
         f"گردانندگی از {old_name} به {new_narrator_name} منتقل شد."
     )

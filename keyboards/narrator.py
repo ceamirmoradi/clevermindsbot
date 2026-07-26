@@ -18,13 +18,21 @@ def narrator_lobby_menu(game_code: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    "🔒 بستن ثبت‌نام",
+                    "🔒 بستن ثبت‌نام و قرعه صندلی",
                     callback_data=f"close_registration:{game_code}",
-                ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🎲 قرعه‌کشی مجدد صندلی‌ها",
+                    callback_data=f"randomize_seats:{game_code}",
+                )
+            ],
+            [
                 InlineKeyboardButton(
                     "▶️ شروع بازی",
                     callback_data=f"start_game:{game_code}",
-                ),
+                )
             ],
             [
                 InlineKeyboardButton(
@@ -57,7 +65,7 @@ def players_management_menu(game_code: str, players: list[dict]) -> InlineKeyboa
     rows.append(
         [
             InlineKeyboardButton(
-                "⬅️ بازگشت به لابی",
+                "⬅️ بازگشت به میز بازی",
                 callback_data=f"refresh_game:{game_code}",
             )
         ]

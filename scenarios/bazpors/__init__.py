@@ -1,3 +1,1 @@
-from .scenario import SCENARIOS
-
-__all__ = ["SCENARIOS"]
+from .scenario import SCENARIO

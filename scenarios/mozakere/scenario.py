@@ -2,7 +2,7 @@ from .roles import ROLES
 
 SCENARIO = {
     "id": "mozakere",
-    "name": "مذاکره ۱۰ نفره",
+    "name": "مذاکره",
     "emoji": "🤝",
     "player_count": 10,
     "description": "سناریوی کلاسیک مذاکره؛ مافیا پس از از دست‌دادن یک یار می‌تواند یک‌بار به‌جای شلیک، شهروند واجد شرایط را جذب کند.",

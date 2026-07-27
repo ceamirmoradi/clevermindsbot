@@ -69,6 +69,11 @@ def narrator_lobby_text(game: dict[str, Any]) -> str:
 def player_detail_text(player: dict[str, Any]) -> str:
     username = f"@{player['username']}" if player.get("username") else "ندارد"
     seat = player.get("seat") or "در انتظار قرعه‌کشی"
+    warnings = player.get("warnings", [])
+    warning_count = len(warnings)
+    warning_line = f"\nاخطارها: <b>{warning_count} از ۳</b>"
+    if player.get("speaking_penalty_pending"):
+        warning_line += "\n🔇 <b>نوبت صحبت بعدی گرفته شده است</b>"
     extra = ""
     if player.get("status") == "kicked":
         extra = (
@@ -80,5 +85,6 @@ def player_detail_text(player: dict[str, Any]) -> str:
         f"وضعیت: <b>{status_label(player['status'])}</b>\n"
         f"صندلی: <b>{seat}</b>\n"
         f"نام کاربری: {username}"
+        f"{warning_line}"
         f"{extra}"
     )

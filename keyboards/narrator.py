@@ -28,6 +28,12 @@ def narrator_lobby_menu(game_code: str, game: dict | None = None) -> InlineKeybo
             ])
         rows.append([
             InlineKeyboardButton(
+                "🎛 ابزارهای بازی",
+                callback_data=f"night_tools:{game_code}",
+            )
+        ])
+        rows.append([
+            InlineKeyboardButton(
                 "📜 تاریخچه بازی",
                 callback_data=f"event_log:{game_code}",
             )
@@ -131,7 +137,27 @@ def player_actions_menu(
     ):
         rows.append([
             InlineKeyboardButton(
-                "🚫 اخراج از بازی",
+                "⚠️ ثبت اخطار",
+                callback_data=f"warn_menu:{game_code}:{user_id}",
+            )
+        ])
+        if player.get("speaking_penalty_pending"):
+            rows.append([
+                InlineKeyboardButton(
+                    "🔇 محرومیت صحبت اجرا شد",
+                    callback_data=f"penalty_served:{game_code}:{user_id}",
+                )
+            ])
+        if player.get("warnings"):
+            rows.append([
+                InlineKeyboardButton(
+                    "↩️ حذف آخرین اخطار",
+                    callback_data=f"warning_undo:{game_code}:{user_id}",
+                )
+            ])
+        rows.append([
+            InlineKeyboardButton(
+                "🚫 اخراج مستقیم از بازی",
                 callback_data=f"kick_menu:{game_code}:{user_id}",
             )
         ])
@@ -199,4 +225,20 @@ def transfer_menu(game_code: str, players: list[dict]) -> InlineKeyboardMarkup:
             callback_data=f"refresh_game:{game_code}",
         )
     ])
+    return InlineKeyboardMarkup(rows)
+
+
+def warning_reason_menu(game_code: str, user_id: int) -> InlineKeyboardMarkup:
+    reasons = [
+        ("🔇 صحبت روی صحبت", "overlap"),
+        ("📢 بی‌نظمی", "disorder"),
+        ("🎭 اشاره یا افشای نقش", "role_hint"),
+        ("🚫 جمله ممنوعه", "forbidden_phrase"),
+        ("⚖️ بحث با گرداننده", "argue_narrator"),
+        ("📡 جهت دادن پس از خروج", "after_exit"),
+        ("📵 اختلال در روند بازی", "disruption"),
+        ("📝 سایر", "other"),
+    ]
+    rows = [[InlineKeyboardButton(label, callback_data=f"warn:{game_code}:{user_id}:{code}")] for label, code in reasons]
+    rows.append([InlineKeyboardButton("⬅️ انصراف", callback_data=f"player:{game_code}:{user_id}")])
     return InlineKeyboardMarkup(rows)

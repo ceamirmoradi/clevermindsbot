@@ -19,7 +19,9 @@ def main_menu() -> InlineKeyboardMarkup:
 def scenarios_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🕵️ بازپرس", callback_data="scenario:bazpors")],
+            [InlineKeyboardButton("⚖️ بازپرس ۱۰ نفره", callback_data="scenario:bazpors10")],
+            [InlineKeyboardButton("⚖️ بازپرس ۱۲ نفره", callback_data="scenario:bazpors12")],
+            [InlineKeyboardButton("⚖️ بازپرس ۱۳ نفره", callback_data="scenario:bazpors13")],
             [InlineKeyboardButton("🤝 مذاکره", callback_data="scenario:mozakere")],
             [InlineKeyboardButton("🦂 عقرب", callback_data="scenario:aghrab")],
             [InlineKeyboardButton("⬅️ بازگشت", callback_data="home")],

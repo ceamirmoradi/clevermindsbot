@@ -2,6 +2,7 @@ import secrets
 from typing import Any
 
 from scenarios import SCENARIOS
+from storage import save_games
 
 _rng = secrets.SystemRandom()
 
@@ -35,6 +36,7 @@ def assign_roles(game: dict[str, Any]) -> list[dict[str, Any]]:
 
     game["roles_assigned"] = True
     game["history"].append("نقش‌ها به‌صورت تصادفی میان بازیکنان تقسیم شدند.")
+    save_games()
     return ordered_players
 
 
@@ -43,6 +45,8 @@ def role_for_player(game: dict[str, Any], player: dict[str, Any]) -> dict[str, A
     role_id = player.get("role")
     if not role_id:
         raise ValueError("برای این بازیکن هنوز نقشی تعیین نشده است.")
+    if role_id == "yakuzad":
+        return {"id":"yakuzad","name":"مافیای یاکوزایی‌شده","emoji":"🤝","team":"mafia","team_name":"مافیا","description":"در طول بازی با یاکوزا به تیم مافیا پیوسته است."}
     return scenario["roles"][role_id]
 
 

@@ -2,7 +2,7 @@ import secrets
 from typing import Any
 
 from scenarios import SCENARIOS
-from storage import games
+from storage import games, save_games
 from engine.event_service import log_event
 
 _rng = secrets.SystemRandom()
@@ -62,6 +62,7 @@ def randomize_seats(game: dict[str, Any]) -> list[dict[str, Any]]:
 
     game["seats_randomized"] = True
     game["history"].append("چیدمان صندلی‌ها به‌صورت تصادفی قرعه‌کشی شد.")
+    save_games()
     return sorted(shuffled, key=lambda p: p["seat"])
 
 
@@ -92,11 +93,14 @@ def create_game(
         "night_number": 0,
         "events": [],
         "pending_actions": [],
+        "all_actions": [],
+        "interrogation": None,
         "narrator_chat_id": narrator_chat_id,
         "lobby_message_id": lobby_message_id,
         "history": [],
     }
     games[code] = game
+    save_games()
     return game
 
 
@@ -125,9 +129,12 @@ def add_pending_player(
         "removed_reason": None,
         "removed_phase": None,
         "kicked_by": None,
+        "warnings": [],
+        "speaking_penalty_pending": False,
     }
     game["players"].append(player)
     game["history"].append(f"{name} درخواست ورود داد.")
+    save_games()
     return player
 
 
@@ -145,6 +152,7 @@ def approve_player(game: dict[str, Any], user_id: int) -> dict[str, Any]:
         game["history"].append(
             f"{player['name']} تأیید شد؛ شماره صندلی هنگام قرعه‌کشی تعیین می‌شود."
         )
+    save_games()
     return player
 
 
@@ -161,6 +169,7 @@ def reject_player(game: dict[str, Any], user_id: int) -> dict[str, Any]:
         f"{player['name']} رد شد"
         + (f" و صندلی {old_seat} آزاد شد." if old_seat else ".")
     )
+    save_games()
     return player
 
 
@@ -178,6 +187,142 @@ def transfer_narrator(
     game["history"].append(
         f"گردانندگی از {old_name} به {new_narrator_name} منتقل شد."
     )
+    save_games()
+
+
+WARNING_REASONS = {
+    "overlap": "صحبت روی صحبت",
+    "disorder": "بی‌نظمی یا رعایت نکردن نظم بازی",
+    "role_hint": "اشاره به نقش یا افشای نقش",
+    "forbidden_phrase": "استفاده از جمله ممنوعه",
+    "argue_narrator": "بحث با گرداننده یا اجرا نکردن دستور",
+    "after_exit": "جهت دادن به بازی پس از خروج",
+    "disruption": "ایجاد مزاحمت یا اختلال در روند بازی",
+    "other": "سایر",
+}
+
+
+def register_warning(
+    game: dict[str, Any],
+    *,
+    user_id: int,
+    narrator_id: int,
+    reason_code: str,
+) -> tuple[dict[str, Any], int, str]:
+    if game.get("status") != "running":
+        raise ValueError("ثبت اخطار فقط بعد از شروع بازی امکان‌پذیر است.")
+    if game.get("phase") != "day":
+        raise ValueError("ثبت اخطار فقط در فاز روز انجام می‌شود.")
+
+    player = get_player(game, user_id)
+    if not player:
+        raise ValueError("بازیکن پیدا نشد.")
+    if player.get("status") != "approved" or not player.get("alive", True):
+        raise ValueError("این بازیکن دیگر داخل بازی فعال نیست.")
+
+    reason = WARNING_REASONS.get(reason_code)
+    if not reason:
+        raise ValueError("دلیل اخطار معتبر نیست.")
+
+    warnings = player.setdefault("warnings", [])
+    level = len(warnings) + 1
+    if level > 3:
+        raise ValueError("این بازیکن قبلاً با اخطار سوم اخراج شده است.")
+
+    consequence = {
+        1: "تذکر",
+        2: "گرفتن نوبت صحبت بعدی",
+        3: "اخراج از بازی",
+    }[level]
+    warnings.append({
+        "level": level,
+        "reason_code": reason_code,
+        "reason": reason,
+        "consequence": consequence,
+        "day": game.get("day_number"),
+        "phase": game.get("phase"),
+    })
+
+    if level == 2:
+        player["speaking_penalty_pending"] = True
+
+    log_event(
+        game,
+        event_type="disciplinary_warning",
+        message=(
+            f"⚠️ اخطار {level} برای {player['name']} ثبت شد. "
+            f"دلیل: {reason}؛ نتیجه: {consequence}."
+        ),
+        actor_id=narrator_id,
+        target_id=user_id,
+        metadata={"level": level, "reason_code": reason_code, "reason": reason},
+    )
+
+    if level == 3:
+        player["status"] = "kicked"
+        player["alive"] = False
+        player["can_act"] = False
+        player["removed_reason"] = "اخطار سوم انضباطی"
+        player["removed_phase"] = "day"
+        player["kicked_by"] = narrator_id
+        player["speaking_penalty_pending"] = False
+        old_actions = game.get("pending_actions", [])
+        game["pending_actions"] = [
+            action for action in old_actions
+            if action.get("actor_id") != user_id
+        ]
+        log_event(
+            game,
+            event_type="player_kicked",
+            message=f"🚫 {player['name']} با اخطار سوم از بازی اخراج شد.",
+            actor_id=narrator_id,
+            target_id=user_id,
+            metadata={"reason": "third_warning", "role": player.get("role"), "team": player.get("team")},
+        )
+
+    save_games()
+    return player, level, consequence
+
+
+def undo_last_warning(game: dict[str, Any], *, user_id: int, narrator_id: int) -> dict[str, Any]:
+    player = get_player(game, user_id)
+    if not player:
+        raise ValueError("بازیکن پیدا نشد.")
+    warnings = player.setdefault("warnings", [])
+    if not warnings:
+        raise ValueError("اخطاری برای حذف وجود ندارد.")
+    if player.get("status") == "kicked" and warnings[-1].get("level") == 3:
+        raise ValueError("اخطار سوم باعث اخراج شده و از این بخش قابل بازگردانی نیست.")
+    removed = warnings.pop()
+    player["speaking_penalty_pending"] = any(w.get("level") == 2 for w in warnings)
+    log_event(
+        game,
+        event_type="warning_undone",
+        message=f"↩️ آخرین اخطار {player['name']} توسط گرداننده حذف شد.",
+        actor_id=narrator_id,
+        target_id=user_id,
+        metadata=removed,
+    )
+    save_games()
+    return player
+
+
+def mark_speaking_penalty_served(game: dict[str, Any], *, user_id: int, narrator_id: int) -> dict[str, Any]:
+    player = get_player(game, user_id)
+    if not player:
+        raise ValueError("بازیکن پیدا نشد.")
+    if not player.get("speaking_penalty_pending"):
+        raise ValueError("این بازیکن محرومیت صحبتِ اجرا نشده ندارد.")
+    player["speaking_penalty_pending"] = False
+    log_event(
+        game,
+        event_type="speaking_penalty_served",
+        message=f"🔇 محرومیت نوبت صحبت {player['name']} اجرا شد.",
+        actor_id=narrator_id,
+        target_id=user_id,
+    )
+    save_games()
+    return player
 
 
 KICK_REASONS = {
@@ -248,6 +393,7 @@ def kick_player(
             "team": player.get("team"),
         },
     )
+    save_games()
     return player
 
 
@@ -265,6 +411,7 @@ def start_night(game: dict[str, Any]) -> None:
         event_type="phase_changed",
         message=f"🌙 شب {game['night_number']} آغاز شد.",
     )
+    save_games()
 
 
 def start_day(game: dict[str, Any]) -> None:
@@ -275,9 +422,12 @@ def start_day(game: dict[str, Any]) -> None:
 
     game["phase"] = "day"
     game["day_number"] = int(game.get("day_number", 1)) + 1
+    from engine.action_service import archive_night_actions
+    archive_night_actions(game)
     game["pending_actions"] = []
     log_event(
         game,
         event_type="phase_changed",
         message=f"☀️ روز {game['day_number']} آغاز شد.",
     )
+    save_games()
